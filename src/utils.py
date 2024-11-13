@@ -9,24 +9,39 @@ from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field
 
 
-def fetch_ogimet_data(date: Optional[datetime.datetime] = None) -> str:
+def fetch_ogimet_data(
+    date: Optional[datetime.datetime] = None,
+) -> tuple[datetime.datetime, datetime.datetime, str]:
     """Fetch the HTML content from the OGIMET website."""
     if date is None:
         date = datetime.datetime.now()
 
+    yyyy = date.year
+    mm = date.month
+    dd = date.day
+    hh = 12
+
+    query_date = f"{yyyy}-{mm:02d}-{dd:02d}"
+    query_time = f"{hh}:00"
+
     url = (
         "https://www.ogimet.com/cgi-bin/gsynres"
         f"?lang=en&osum=no&state=Indon&fmt=html"
-        f"&ano={date.year}&mes={date.month:02d}&day={date.day:02d}"
-        f"&hora={12}&ord=REV"
+        f"&ano={yyyy}&mes={mm:02d}&day={dd:02d}"
+        f"&hora={hh}&ord=REV"
     )
 
     with urllib.request.urlopen(url) as response:
-        return response.read().decode("utf-8")
+        return query_date, query_time, response.read().decode("utf-8")
 
 
 class WeatherData(BaseModel):
-    station: OptionalType[str] = Field(None, description="Weather station identifier")
+    date: str = Field(
+        description="Date of the weather observation in YYYY-MM-DD format"
+    )
+    time: str = Field(description="Time of the weather observation in HH:MM format")
+    station_id: str = Field(description="Weather station identifier")
+    station_name: str = Field(description="Weather station name")
     temp_max: OptionalType[float] = Field(None, description="Maximum temperature")
     temp_min: OptionalType[float] = Field(None, description="Minimum temperature")
     temp_med: OptionalType[float] = Field(None, description="Medium temperature")
@@ -41,12 +56,16 @@ class WeatherData(BaseModel):
     sun_duration: OptionalType[float] = Field(None, description="Sun duration")
     visibility: OptionalType[float] = Field(None, description="Visibility distance")
     snow_depth: OptionalType[int] = Field(None, description="Snow depth")
-    weather_conditions: OptionalType[list[dict]] = Field(
-        None, description="Weather conditions description"
-    )
+    # weather_conditions: OptionalType[list[dict]] = Field(
+    #     None, description="Weather conditions description"
+    # )
 
 
-def parse_ogimet_data(html_content: str) -> pd.DataFrame:
+def parse_ogimet_data(
+    query_date: str,
+    query_time: str,
+    html_content: str,
+) -> pd.DataFrame:
     """Parse the HTML content from the OGIMET website and return a pandas DataFrame."""
     soup = BeautifulSoup(html_content, "html.parser")
 
@@ -68,7 +87,10 @@ def parse_ogimet_data(html_content: str) -> pd.DataFrame:
     # Initialize lists to store data
 
     columns = [
-        "station",
+        "date",
+        "time",
+        "station_id",
+        "station_name",
         "temp_max",
         "temp_min",
         "temp_med",
@@ -81,7 +103,7 @@ def parse_ogimet_data(html_content: str) -> pd.DataFrame:
         "sun_duration",
         "visibility",
         "snow_depth",
-        "weather_conditions",
+        # "weather_conditions",
     ]
 
     data = pd.DataFrame(columns=columns)
@@ -92,7 +114,23 @@ def parse_ogimet_data(html_content: str) -> pd.DataFrame:
         if len(cells) < 14:  # Ensure row has enough cells
             continue
 
-        station = null_if_empty(cells[0].text.strip())
+        station_cell = cells[0].find("a")
+        if station_cell and station_cell.get("onmouseover"):
+            mouseover = station_cell.get("onmouseover")
+            if "CAPTION," in mouseover:
+                station = null_if_empty(
+                    mouseover.split("CAPTION,")[1].split("'")[1].strip()
+                )
+            else:
+                station = null_if_empty(station_cell.text.strip())
+        else:
+            station = null_if_empty(cells[0].text.strip())
+
+        if station == "Summary":
+            continue
+
+        station_id = station.split("-")[0].strip()
+        station_name = station.split("-")[1].strip()
         temp_max = null_if_empty(cells[1].text.strip())
         temp_min = null_if_empty(cells[2].text.strip())
         temp_med = null_if_empty(cells[3].text.strip())
@@ -156,7 +194,10 @@ def parse_ogimet_data(html_content: str) -> pd.DataFrame:
         # print("-" * 100)
 
         row_data = {
-            "station": station,
+            "date": query_date,
+            "time": query_time,
+            "station_id": station_id,
+            "station_name": station_name,
             "temp_max": temp_max,
             "temp_min": temp_min,
             "temp_med": temp_med,
@@ -169,7 +210,7 @@ def parse_ogimet_data(html_content: str) -> pd.DataFrame:
             "sun_duration": sun_duration,
             "visibility": visibility,
             "snow_depth": snow_depth,
-            "weather_conditions": weather_conditions,
+            # "weather_conditions": weather_conditions,
         }
 
         weather_data = WeatherData(**row_data)
@@ -179,6 +220,25 @@ def parse_ogimet_data(html_content: str) -> pd.DataFrame:
         )
 
     return data
+
+
+def fetch_and_parse_data(date: Optional[datetime.datetime] = None) -> pd.DataFrame:
+    """
+    Fetch and parse weather data from OGIMET website.
+
+    Args:
+        date: Optional datetime object. If not provided, current date will be used.
+
+    Returns:
+        pandas DataFrame containing the parsed weather data
+    """
+    # Fetch the data
+    query_date, query_time, html_content = fetch_ogimet_data(date)
+
+    # Parse the data
+    df = parse_ogimet_data(query_date, query_time, html_content)
+
+    return df
 
 
 def null_if_empty(value: str) -> Optional[str]:
