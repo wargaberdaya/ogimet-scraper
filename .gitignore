@@ -1,6 +1,5 @@
 __pycache__
 .venv
 .pytest_cache
-data.csv
-data.xlsx
-~$data.xlsx
+*.csv
+*.xlsx
