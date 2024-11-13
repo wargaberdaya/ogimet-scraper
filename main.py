@@ -28,19 +28,23 @@ def summary(
             start_date + datetime.timedelta(days=x)
             for x in range((end_date - start_date).days + 1)
         ]
+        print(f"Fetching weather data from {from_date} to {to_date}")
     else:
         date_range = [start_date]
+        print(f"Fetching weather data for {from_date}")
 
     dfs = []
-    for date in date_range:
-        df = fetch_and_parse_data(date=date)
-        dfs.append(df)
+    with typer.progressbar(date_range, label="Fetching weather data") as progress:
+        for date in progress:
+            df = fetch_and_parse_data(date=date)
+            dfs.append(df)
 
     combined_df = pd.concat(dfs, ignore_index=True)
     filename = f"data_{from_date}"
     if to_date:
         filename += f"-_{to_date}"
     combined_df.to_excel(f"{filename}.xlsx", index=False)
+    print(f"Data saved to {filename}.xlsx")
 
 
 if __name__ == "__main__":

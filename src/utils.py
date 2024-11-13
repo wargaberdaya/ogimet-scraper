@@ -7,6 +7,9 @@ from typing import Optional as OptionalType
 import pandas as pd
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field
+import warnings
+
+warnings.simplefilter(action="ignore", category=FutureWarning)
 
 
 def fetch_ogimet_data(
