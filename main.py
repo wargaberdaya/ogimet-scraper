@@ -1,8 +1,7 @@
-import datetime
-import os
 import typer
 from src.utils import fetch_and_parse_data, create_date_range, save_output
 import pandas as pd
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 app = typer.Typer()
 
@@ -22,10 +21,16 @@ def summary(
     date_range = create_date_range(from_date=from_date, to_date=to_date)
 
     dfs = []
-    with typer.progressbar(date_range, label="Fetching weather data") as progress:
-        for date in progress:
-            df = fetch_and_parse_data(date=date)
-            dfs.append(df)
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = [executor.submit(fetch_and_parse_data, date) for date in date_range]
+
+        with typer.progressbar(
+            as_completed(futures), length=len(futures), label="Fetching weather data"
+        ) as progress:
+            for future in progress:
+                df = future.result()
+                dfs.append(df)
 
     combined_df = pd.concat(dfs, ignore_index=True)
 
