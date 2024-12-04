@@ -43,7 +43,6 @@ def create_weather_table():
 
 def insert_weather_data(weather_data: BaseModel):
     """Insert weather data into SQLite database."""
-    create_weather_table()
 
     with get_db_connection() as conn:
         cursor = conn.cursor()
@@ -102,3 +101,13 @@ def get_existing_dates() -> list[str]:
         cursor = conn.cursor()
         cursor.execute("SELECT DISTINCT date FROM weather_data")
         return [date[0] for date in cursor.fetchall()]
+
+
+def init_database():
+    """Initialize the database and create tables if they don't exist."""
+    # Create database file if it doesn't exist
+    with sqlite3.connect("weather_data.db") as conn:
+        pass
+
+    # Create required tables
+    create_weather_table()

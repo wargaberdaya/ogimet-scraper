@@ -4,7 +4,7 @@ from src.utils import (
     save_output,
     get_missing_dates,
 )
-from src.db import get_weather_data, get_db_connection
+from src.db import get_weather_data, init_database
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -25,7 +25,7 @@ def summary(
 ):
     missing_dates = get_missing_dates(from_date=from_date, to_date=to_date)
 
-    get_db_connection()
+    init_database()
 
     with ThreadPoolExecutor(max_workers=10) as executor:
         futures = [
