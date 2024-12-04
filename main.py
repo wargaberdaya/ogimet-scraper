@@ -1,7 +1,7 @@
 import datetime
 import os
 import typer
-from src.utils import fetch_and_parse_data
+from src.utils import fetch_and_parse_data, create_date_range
 import pandas as pd
 
 app = typer.Typer()
@@ -19,20 +19,7 @@ def summary(
         None, "--to", help="Optional end date in YYYY-MM-DD format"
     ),
 ):
-    year, month, day = from_date.split("-")
-    start_date = datetime.datetime(year=int(year), month=int(month), day=int(day))
-
-    if to_date:
-        year, month, day = to_date.split("-")
-        end_date = datetime.datetime(year=int(year), month=int(month), day=int(day))
-        date_range = [
-            start_date + datetime.timedelta(days=x)
-            for x in range((end_date - start_date).days + 1)
-        ]
-        print(f"Fetching weather data from {from_date} to {to_date}")
-    else:
-        date_range = [start_date]
-        print(f"Fetching weather data for {from_date}")
+    date_range = create_date_range(from_date=from_date, to_date=to_date)
 
     dfs = []
     with typer.progressbar(date_range, label="Fetching weather data") as progress:

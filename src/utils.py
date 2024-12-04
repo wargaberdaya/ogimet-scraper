@@ -250,3 +250,25 @@ def null_if_empty(value: str) -> Optional[str]:
     if value in empty_values:
         return None
     return value
+
+
+def create_date_range(
+    from_date: str, to_date: Optional[str] = None
+) -> list[datetime.datetime]:
+    """Create a date range from a start date to an end date."""
+    year, month, day = from_date.split("-")
+    start_date = datetime.datetime(year=int(year), month=int(month), day=int(day))
+
+    if to_date:
+        year, month, day = to_date.split("-")
+        end_date = datetime.datetime(year=int(year), month=int(month), day=int(day))
+        date_range = [
+            start_date + datetime.timedelta(days=x)
+            for x in range((end_date - start_date).days + 1)
+        ]
+        print(f"Fetching weather data from {from_date} to {to_date}")
+    else:
+        date_range = [start_date]
+        print(f"Fetching weather data for {from_date}")
+
+    return date_range
