@@ -195,8 +195,11 @@ def parse_ogimet_data(
             # "weather_conditions": weather_conditions,
         }
 
-        weather_data = WeatherData(**row_data)
-        insert_weather_data(weather_data)
+        try:
+            weather_data = WeatherData(**row_data)
+            insert_weather_data(weather_data)
+        except Exception as e:
+            logging.warn(f"Error inserting weather data: {e}")
 
 
 def fetch_and_parse_data(date: Optional[datetime.datetime] = None) -> pd.DataFrame:
@@ -284,5 +287,8 @@ def save_output(df: pd.DataFrame):
     df.to_json(f"{folder}/data.json", orient="records")
     print(f"Data saved to {folder}/data.json")
 
-    df.to_excel(f"{folder}/data.xlsx", index=False)
-    print("Data saved to output/data.xlsx")
+    df.to_parquet(f"{folder}/data.parquet")
+    print(f"Data saved to {folder}/data.parquet")
+
+    # df.to_excel(f"{folder}/data.xlsx", index=False)
+    # print("Data saved to output/data.xlsx")
