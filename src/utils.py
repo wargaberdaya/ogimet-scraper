@@ -255,13 +255,32 @@ def null_if_empty(value: str) -> Optional[str]:
 def create_date_range(
     from_date: str, to_date: Optional[str] = None
 ) -> list[datetime.datetime]:
-    """Create a date range from a start date to an end date."""
-    year, month, day = from_date.split("-")
-    start_date = datetime.datetime(year=int(year), month=int(month), day=int(day))
+    """Create a date range from a start date to an end date.
+
+    Args:
+        from_date: Start date in YYYY-MM-DD format
+        to_date: Optional end date in YYYY-MM-DD format
+
+    Returns:
+        List of datetime objects representing the date range
+
+    Raises:
+        ValueError: If dates are invalid or end date is before start date
+    """
+    try:
+        start_date = datetime.datetime.strptime(from_date, "%Y-%m-%d")
+    except ValueError:
+        raise ValueError(f"Invalid start date format: {from_date}. Use YYYY-MM-DD")
 
     if to_date:
-        year, month, day = to_date.split("-")
-        end_date = datetime.datetime(year=int(year), month=int(month), day=int(day))
+        try:
+            end_date = datetime.datetime.strptime(to_date, "%Y-%m-%d")
+        except ValueError:
+            raise ValueError(f"Invalid end date format: {to_date}. Use YYYY-MM-DD")
+
+        if end_date < start_date:
+            raise ValueError("End date cannot be before start date")
+
         date_range = [
             start_date + datetime.timedelta(days=x)
             for x in range((end_date - start_date).days + 1)
