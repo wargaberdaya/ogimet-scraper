@@ -1,14 +1,16 @@
 import datetime
 import logging
+import os
 import urllib.request
+import warnings
 from typing import Optional, Union
 from typing import Optional as OptionalType
 
 import pandas as pd
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field
-import warnings
-import os
+
+from src.db import insert_weather_data, get_weather_data, get_existing_dates
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
@@ -69,8 +71,8 @@ def parse_ogimet_data(
     query_date: str,
     query_time: str,
     html_content: str,
-) -> pd.DataFrame:
-    """Parse the HTML content from the OGIMET website and return a pandas DataFrame."""
+) -> None:
+    """Parse the HTML content from the OGIMET website and store in SQLite database."""
     soup = BeautifulSoup(html_content, "html.parser")
 
     # Find the main weather data table
@@ -86,31 +88,7 @@ def parse_ogimet_data(
 
     if table is None:
         logging.warning("No weather data table found in HTML content")
-        return pd.DataFrame()
-
-    # Initialize lists to store data
-
-    columns = [
-        "date",
-        "time",
-        "station_id",
-        "station_name",
-        "temp_max",
-        "temp_min",
-        "temp_med",
-        "wind_dir",
-        "wind_speed",
-        "pressure",
-        "precipitation",
-        "total_cloud",
-        "low_cloud",
-        "sun_duration",
-        "visibility",
-        "snow_depth",
-        # "weather_conditions",
-    ]
-
-    data = pd.DataFrame(columns=columns)
+        return
 
     # Process each row in the table
     for row in table.find_all("tr")[1:]:  # Skip header row
@@ -218,12 +196,7 @@ def parse_ogimet_data(
         }
 
         weather_data = WeatherData(**row_data)
-
-        data = pd.concat(
-            [data, pd.DataFrame([weather_data.model_dump()])], ignore_index=True
-        )
-
-    return data
+        insert_weather_data(weather_data)
 
 
 def fetch_and_parse_data(date: Optional[datetime.datetime] = None) -> pd.DataFrame:
@@ -240,9 +213,7 @@ def fetch_and_parse_data(date: Optional[datetime.datetime] = None) -> pd.DataFra
     query_date, query_time, html_content = fetch_ogimet_data(date)
 
     # Parse the data
-    df = parse_ogimet_data(query_date, query_time, html_content)
-
-    return df
+    parse_ogimet_data(query_date, query_time, html_content)
 
 
 def null_if_empty(value: str) -> Optional[str]:
@@ -294,18 +265,24 @@ def create_date_range(
     return date_range
 
 
+def get_missing_dates(from_date: str, to_date: str) -> list[datetime.datetime]:
+    date_range = create_date_range(from_date=from_date, to_date=to_date)
+    existing_dates = get_existing_dates()
+    return [
+        date for date in date_range if date.strftime("%Y-%m-%d") not in existing_dates
+    ]
+
+
 def save_output(df: pd.DataFrame):
     df = df.sort_values("date")
     from_date = df.iloc[0]["date"]
     to_date = df.iloc[-1]["date"]
 
-    filename = f"data_{from_date}_{to_date}"
+    folder = f"output/{from_date}_{to_date}"
+    os.makedirs(folder, exist_ok=True)
 
-    # Create output directory if it doesn't exist
-    os.makedirs("output", exist_ok=True)
+    df.to_json(f"{folder}/data.json", orient="records")
+    print(f"Data saved to {folder}/data.json")
 
-    df.to_json(f"output/{filename}.json", orient="records")
-    print(f"Data saved to output/{filename}.json")
-
-    df.to_excel(f"output/{filename}.xlsx", index=False)
-    print(f"Data saved to output/{filename}.xlsx")
+    df.to_excel(f"{folder}/data.xlsx", index=False)
+    print("Data saved to output/data.xlsx")

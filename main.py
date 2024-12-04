@@ -1,5 +1,10 @@
 import typer
-from src.utils import fetch_and_parse_data, create_date_range, save_output
+from src.utils import (
+    fetch_and_parse_data,
+    save_output,
+    get_missing_dates,
+)
+from src.db import get_weather_data
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -18,23 +23,43 @@ def summary(
         None, "--to", help="Optional end date in YYYY-MM-DD format"
     ),
 ):
-    date_range = create_date_range(from_date=from_date, to_date=to_date)
-
-    dfs = []
+    missing_dates = get_missing_dates(from_date=from_date, to_date=to_date)
 
     with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = [executor.submit(fetch_and_parse_data, date) for date in date_range]
+        futures = [
+            executor.submit(fetch_and_parse_data, date) for date in missing_dates
+        ]
 
         with typer.progressbar(
             as_completed(futures), length=len(futures), label="Fetching weather data"
         ) as progress:
             for future in progress:
-                df = future.result()
-                dfs.append(df)
+                future.result()
 
-    combined_df = pd.concat(dfs, ignore_index=True)
+    weather_data = get_weather_data(from_date=from_date, to_date=to_date)
 
-    save_output(df=combined_df)
+    df = pd.DataFrame(
+        weather_data,
+        columns=[
+            "date",
+            "time",
+            "station_id",
+            "station_name",
+            "temp_max",
+            "temp_min",
+            "temp_med",
+            "wind_dir",
+            "wind_speed",
+            "pressure",
+            "precipitation",
+            "total_cloud",
+            "low_cloud",
+            "sun_duration",
+            "visibility",
+            "snow_depth",
+        ],
+    )
+    save_output(df=df)
 
 
 if __name__ == "__main__":
