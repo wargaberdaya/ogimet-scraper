@@ -1,4 +1,5 @@
 import datetime
+import os
 import typer
 from src.utils import fetch_and_parse_data
 import pandas as pd
@@ -43,8 +44,11 @@ def summary(
     filename = f"data_{from_date}"
     if to_date:
         filename += f"-_{to_date}"
-    combined_df.to_excel(f"/output/{filename}.xlsx", index=False)
-    print(f"Data saved to /output/{filename}.xlsx")
+
+    # Create output directory if it doesn't exist
+    os.makedirs("output", exist_ok=True)
+    combined_df.to_excel(f"output/{filename}.xlsx", index=False)
+    print(f"Data saved to output/{filename}.xlsx")
 
 
 if __name__ == "__main__":
