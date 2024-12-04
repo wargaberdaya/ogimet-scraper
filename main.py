@@ -1,7 +1,7 @@
 import datetime
 import os
 import typer
-from src.utils import fetch_and_parse_data, create_date_range
+from src.utils import fetch_and_parse_data, create_date_range, save_output
 import pandas as pd
 
 app = typer.Typer()
@@ -28,14 +28,8 @@ def summary(
             dfs.append(df)
 
     combined_df = pd.concat(dfs, ignore_index=True)
-    filename = f"data_{from_date}"
-    if to_date:
-        filename += f"-_{to_date}"
 
-    # Create output directory if it doesn't exist
-    os.makedirs("output", exist_ok=True)
-    combined_df.to_excel(f"output/{filename}.xlsx", index=False)
-    print(f"Data saved to output/{filename}.xlsx")
+    save_output(df=combined_df)
 
 
 if __name__ == "__main__":

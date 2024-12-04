@@ -8,6 +8,7 @@ import pandas as pd
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field
 import warnings
+import os
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
@@ -291,3 +292,20 @@ def create_date_range(
         print(f"Fetching weather data for {from_date}")
 
     return date_range
+
+
+def save_output(df: pd.DataFrame):
+    df = df.sort_values("date")
+    from_date = df.iloc[0]["date"]
+    to_date = df.iloc[-1]["date"]
+
+    filename = f"data_{from_date}_{to_date}"
+
+    # Create output directory if it doesn't exist
+    os.makedirs("output", exist_ok=True)
+
+    df.to_json(f"output/{filename}.json", orient="records")
+    print(f"Data saved to output/{filename}.json")
+
+    df.to_excel(f"output/{filename}.xlsx", index=False)
+    print(f"Data saved to output/{filename}.xlsx")
