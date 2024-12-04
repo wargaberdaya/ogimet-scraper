@@ -43,8 +43,8 @@ def summary(
     filename = f"data_{from_date}"
     if to_date:
         filename += f"-_{to_date}"
-    combined_df.to_excel(f"{filename}.xlsx", index=False)
-    print(f"Data saved to {filename}.xlsx")
+    combined_df.to_excel(f"/output/{filename}.xlsx", index=False)
+    print(f"Data saved to /output/{filename}.xlsx")
 
 
 if __name__ == "__main__":
