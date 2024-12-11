@@ -90,6 +90,8 @@ def parse_ogimet_data(
         logging.warning("No weather data table found in HTML content")
         return
 
+    weather_data_batch = []  # Create a list to store all weather data records
+
     # Process each row in the table
     for row in table.find_all("tr")[1:]:  # Skip header row
         cells = row.find_all("td")
@@ -197,9 +199,19 @@ def parse_ogimet_data(
 
         try:
             weather_data = WeatherData(**row_data)
-            insert_weather_data(weather_data)
+            weather_data_batch.append(weather_data)  # Add to batch instead of inserting
         except Exception as e:
-            logging.warn(f"Error inserting weather data: {e}")
+            logging.warn(f"Error creating weather data object: {e}")
+
+    # Insert all records in batch at the end
+    if weather_data_batch:
+        try:
+            print(
+                f"Inserting {len(weather_data_batch)} weather records for {query_date} {query_time}"
+            )
+            insert_weather_data(weather_data_batch)
+        except Exception as e:
+            logging.error(f"Error inserting batch weather data: {e}")
 
 
 def fetch_and_parse_data(date: Optional[datetime.datetime] = None) -> pd.DataFrame:
@@ -212,11 +224,18 @@ def fetch_and_parse_data(date: Optional[datetime.datetime] = None) -> pd.DataFra
     Returns:
         pandas DataFrame containing the parsed weather data
     """
+
+    print(f"Fetching weather data for {date}")
+
     # Fetch the data
     query_date, query_time, html_content = fetch_ogimet_data(date)
 
+    print(f"Fetched weather data for {date}")
+
     # Parse the data
     parse_ogimet_data(query_date, query_time, html_content)
+
+    print(f"Parsed weather data for {date}")
 
 
 def null_if_empty(value: str) -> Optional[str]:

@@ -1,7 +1,7 @@
 import os
 import psycopg2
 from contextlib import contextmanager
-from typing import Optional
+from typing import Optional, Union
 from pydantic import BaseModel
 
 from dotenv import load_dotenv
@@ -64,21 +64,41 @@ def create_weather_table():
                 print("Weather data table already exists.")
 
 
-def insert_weather_data(weather_data: BaseModel):
+def insert_weather_data(weather_data: Union[BaseModel, list[BaseModel]]):
     """Insert weather data into PostgreSQL database."""
     with get_db_connection() as conn:
         with conn.cursor() as cur:
-            data_dict = weather_data.model_dump()
-            placeholders = ", ".join(["%s" for _ in data_dict])
-            columns = ", ".join(data_dict.keys())
+            # Handle single record or batch
+            if not isinstance(weather_data, list):
+                weather_data = [weather_data]
+
+            if not weather_data:
+                return
+
+            # Get column names from first record
+            data_dict = weather_data[0].model_dump()
+            columns = list(data_dict.keys())
+
+            # Prepare values for all records
+            values = [
+                [record.model_dump()[col] for col in columns] for record in weather_data
+            ]
+
+            # Create placeholders for the SQL query
+            placeholders = ",".join(["%s"] * len(columns))
+
+            # Construct the SQL query with ON CONFLICT clause
             sql = f"""
-                INSERT INTO weather_data ({columns}) 
+                INSERT INTO weather_data ({', '.join(columns)}) 
                 VALUES ({placeholders})
                 ON CONFLICT (date, time, station_id) 
                 DO UPDATE SET 
-                    {', '.join(f"{k} = EXCLUDED.{k}" for k in data_dict.keys())}
+                    {', '.join(f"{col} = EXCLUDED.{col}" for col in columns)}
             """
-            cur.execute(sql, list(data_dict.values()))
+
+            # Execute many inserts at once
+            cur.executemany(sql, values)
+
         conn.commit()
 
 
