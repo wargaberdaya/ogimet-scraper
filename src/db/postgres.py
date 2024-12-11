@@ -101,12 +101,13 @@ def get_weather_data(
     conditions = []
     params = []
 
-    if from_date:
-        conditions.append("date >= %s")
+    if from_date and to_date is None:
+        conditions.append("date = %s")
         params.append(from_date)
 
-    if to_date:
-        conditions.append("date <= %s")
+    if from_date and to_date:
+        conditions.append("date >= %s AND date <= %s")
+        params.append(from_date)
         params.append(to_date)
 
     if station_id:
