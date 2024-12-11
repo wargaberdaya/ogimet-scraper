@@ -10,7 +10,7 @@ import pandas as pd
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field
 
-from src.db import insert_weather_data, get_weather_data, get_existing_dates
+from src.db.postgres import insert_weather_data, get_weather_data, get_existing_dates
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 

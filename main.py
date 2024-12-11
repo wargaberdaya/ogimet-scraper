@@ -4,7 +4,7 @@ from src.utils import (
     save_output,
     get_missing_dates,
 )
-from src.db import get_weather_data, init_database
+from src.db.postgres import get_weather_data, init_database
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -23,9 +23,9 @@ def summary(
         None, "--to", help="Optional end date in YYYY-MM-DD format"
     ),
 ):
-    missing_dates = get_missing_dates(from_date=from_date, to_date=to_date)
-
     init_database()
+
+    missing_dates = get_missing_dates(from_date=from_date, to_date=to_date)
 
     with ThreadPoolExecutor(max_workers=10) as executor:
         futures = [
@@ -61,6 +61,7 @@ def summary(
             "snow_depth",
         ],
     )
+
     save_output(df=df)
 
 

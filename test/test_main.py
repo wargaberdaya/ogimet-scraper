@@ -1,7 +1,7 @@
 from typer.testing import CliRunner
 import pytest
 from main import app
-from src.db import init_database
+from src.db.postgres import init_database
 
 runner = CliRunner()
 
