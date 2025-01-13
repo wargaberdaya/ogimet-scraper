@@ -89,11 +89,11 @@ def insert_weather_data(weather_data: Union[BaseModel, list[BaseModel]]):
 
             # Construct the SQL query with ON CONFLICT clause
             sql = f"""
-                INSERT INTO weather_data ({', '.join(columns)}) 
+                INSERT INTO weather_data ({", ".join(columns)}) 
                 VALUES ({placeholders})
                 ON CONFLICT (date, time, station_id) 
                 DO UPDATE SET 
-                    {', '.join(f"{col} = EXCLUDED.{col}" for col in columns)}
+                    {", ".join(f"{col} = EXCLUDED.{col}" for col in columns)}
             """
 
             # Execute many inserts at once
@@ -142,6 +142,14 @@ def get_weather_data(
                 f"SELECT * FROM weather_data WHERE {where_clause} ORDER BY date, time"
             )
             cur.execute(query, params)
+            return cur.fetchall()
+
+
+def get_all_weather_data() -> list[tuple]:
+    """Get all weather data from the database."""
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM weather_data")
             return cur.fetchall()
 
 

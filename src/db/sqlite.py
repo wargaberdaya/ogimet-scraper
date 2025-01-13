@@ -1,13 +1,15 @@
+import os
 import sqlite3
 from contextlib import contextmanager
-from typing import Optional
+from typing import Optional, Union
 from pydantic import BaseModel
 
 
 @contextmanager
 def get_db_connection():
     """Create a database connection context manager."""
-    conn = sqlite3.connect("weather_data.db")
+    db_path = os.getenv("DATABASE_PATH", "weather_data.db")
+    conn = sqlite3.connect(db_path)
     try:
         yield conn
     finally:
@@ -17,7 +19,8 @@ def get_db_connection():
 def create_weather_table():
     """Create the weather data table if it doesn't exist."""
     with get_db_connection() as conn:
-        conn.execute("""
+        cur = conn.cursor()
+        cur.execute("""
             CREATE TABLE IF NOT EXISTS weather_data (
                 date TEXT,
                 time TEXT,
@@ -28,31 +31,56 @@ def create_weather_table():
                 temp_med REAL,
                 wind_dir TEXT,
                 wind_speed REAL,
+                wind_gust REAL,
                 pressure REAL,
-                precipitation TEXT,
+                precipitation REAL,
                 total_cloud REAL,
                 low_cloud REAL,
                 sun_duration REAL,
                 visibility REAL,
+                humidity REAL,
+                dew_point REAL,
+                weather_summary TEXT,
                 snow_depth INTEGER,
+                _updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 PRIMARY KEY (date, time, station_id)
             )
         """)
         conn.commit()
+        print("Weather data table created successfully.")
 
 
-def insert_weather_data(weather_data: BaseModel):
+def insert_weather_data(weather_data: Union[BaseModel, list[BaseModel]]):
     """Insert weather data into SQLite database."""
-
     with get_db_connection() as conn:
-        cursor = conn.cursor()
+        cur = conn.cursor()
+        # Handle single record or batch
+        if not isinstance(weather_data, list):
+            weather_data = [weather_data]
 
-        data_dict = weather_data.model_dump()
-        placeholders = ", ".join(["?" for _ in data_dict])
-        columns = ", ".join(data_dict.keys())
-        sql = f"INSERT OR REPLACE INTO weather_data ({columns}) VALUES ({placeholders})"
+        if not weather_data:
+            return
 
-        cursor.execute(sql, list(data_dict.values()))
+        # Get column names from first record
+        data_dict = weather_data[0].model_dump()
+        columns = list(data_dict.keys())
+
+        # Prepare values for all records
+        values = [
+            [record.model_dump()[col] for col in columns] for record in weather_data
+        ]
+
+        # Create placeholders for the SQL query
+        placeholders = ",".join(["?" for _ in columns])
+
+        # Construct the SQL query with ON CONFLICT clause
+        sql = f"""
+            INSERT OR REPLACE INTO weather_data ({", ".join(columns)}) 
+            VALUES ({placeholders})
+        """
+
+        # Execute many inserts at once
+        cur.executemany(sql, values)
         conn.commit()
 
 
@@ -75,39 +103,44 @@ def get_weather_data(
     conditions = []
     params = []
 
-    if from_date:
-        conditions.append("date >= ?")
+    if from_date and to_date is None:
+        conditions.append("date = ?")
         params.append(from_date)
 
-    if to_date:
-        conditions.append("date <= ?")
+    if from_date and to_date:
+        conditions.append("date >= ? AND date <= ?")
+        params.append(from_date)
         params.append(to_date)
 
     if station_id:
         conditions.append("station_id = ?")
         params.append(station_id)
 
-    where_clause = " AND ".join(conditions) if conditions else "1=1"
+    where_clause = " AND ".join(conditions) if conditions else "1"
 
     with get_db_connection() as conn:
-        cursor = conn.cursor()
+        cur = conn.cursor()
         query = f"SELECT * FROM weather_data WHERE {where_clause} ORDER BY date, time"
-        cursor.execute(query, params)
-        return cursor.fetchall()
+        cur.execute(query, params)
+        return cur.fetchall()
+
+
+def get_all_weather_data() -> list[tuple]:
+    """Get all weather data from the database."""
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM weather_data")
+        return cur.fetchall()
 
 
 def get_existing_dates() -> list[str]:
+    """Get list of distinct dates in the database."""
     with get_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT DISTINCT date FROM weather_data")
-        return [date[0] for date in cursor.fetchall()]
+        cur = conn.cursor()
+        cur.execute("SELECT DISTINCT date FROM weather_data")
+        return [date[0] for date in cur.fetchall()]
 
 
 def init_database():
     """Initialize the database and create tables if they don't exist."""
-    # Create database file if it doesn't exist
-    with sqlite3.connect("weather_data.db") as conn:
-        pass
-
-    # Create required tables
     create_weather_table()

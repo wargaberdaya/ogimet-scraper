@@ -5,12 +5,14 @@ import urllib.request
 import warnings
 from typing import Optional, Union
 from typing import Optional as OptionalType
-
+import time
 import pandas as pd
 from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field
+import requests
+import typer
 
-from src.db.postgres import insert_weather_data, get_weather_data, get_existing_dates
+from src.db.sqlite import insert_weather_data, get_weather_data, get_existing_dates
 
 warnings.simplefilter(action="ignore", category=FutureWarning)
 
@@ -37,8 +39,28 @@ def fetch_ogimet_data(
         f"&hora={hh}&ord=REV"
     )
 
-    with urllib.request.urlopen(url) as response:
-        return query_date, query_time, response.read().decode("utf-8")
+    # print(f"Fetching data from URL: {url}")
+
+    logging.info(f"Fetching data from URL: {url}")
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Connection": "keep-alive",
+        "Cookie": "ogimet_serverid=huracan|Z4N5U|Z4N3p",
+        "Cache-Control": "no-cache",
+    }
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+    except requests.exceptions.Timeout:
+        print("Request timed out - retrying once...")
+        time.sleep(2)
+        response = requests.get(url, headers=headers, timeout=10)
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching data: {e}")
+        raise
+    return query_date, query_time, response.text
 
 
 class WeatherData(BaseModel):
@@ -53,27 +75,29 @@ class WeatherData(BaseModel):
     temp_med: OptionalType[float] = Field(None, description="Medium temperature")
     wind_dir: OptionalType[str] = Field(None, description="Wind direction")
     wind_speed: OptionalType[float] = Field(None, description="Wind speed")
+    wind_gust: OptionalType[float] = Field(None, description="Wind gust speed")
     pressure: OptionalType[float] = Field(None, description="Atmospheric pressure")
-    precipitation: OptionalType[Union[float, str]] = Field(
-        None, description="Precipitation amount"
-    )
+    precipitation: OptionalType[float] = Field(None, description="Precipitation amount")
     total_cloud: OptionalType[float] = Field(None, description="Total cloud cover")
     low_cloud: OptionalType[float] = Field(None, description="Low cloud cover")
     sun_duration: OptionalType[float] = Field(None, description="Sun duration")
     visibility: OptionalType[float] = Field(None, description="Visibility distance")
+    humidity: OptionalType[float] = Field(None, description="Relative humidity")
+    dew_point: OptionalType[float] = Field(None, description="Dew point temperature")
+    weather_summary: OptionalType[str] = Field(
+        None, description="Weather conditions summary"
+    )
     snow_depth: OptionalType[int] = Field(None, description="Snow depth")
-    # weather_conditions: OptionalType[list[dict]] = Field(
-    #     None, description="Weather conditions description"
-    # )
 
 
 def parse_ogimet_data(
     query_date: str,
     query_time: str,
     html_content: str,
-) -> None:
-    """Parse the HTML content from the OGIMET website and store in SQLite database."""
+) -> list[WeatherData]:
+    """Parse the HTML content from the OGIMET website and return list of WeatherData objects."""
     soup = BeautifulSoup(html_content, "html.parser")
+    weather_data_batch = []
 
     # Find the main weather data table
     table = soup.find(
@@ -87,17 +111,39 @@ def parse_ogimet_data(
     )
 
     if table is None:
-        logging.warning("No weather data table found in HTML content")
-        return
+        print("No weather data table found in HTML content")
+        return weather_data_batch
 
-    weather_data_batch = []  # Create a list to store all weather data records
+    # Get column positions from headers
+    headers = table.find_all("tr")[1:3]  # Get the first two rows (header rows)
+
+    column_map = get_column_mapping(headers)
+
+    if len(column_map) == 0:
+        return weather_data_batch
+
+    # example_column_map =  {
+    #     "station": 0,
+    #     "temp_max": 1,
+    #     "humidity": 2,
+    #     "wind_dir": 3,
+    #     "wind_speed": 4,
+    #     "pressure": 5,
+    #     "precipitation": 6,
+    #     "total_cloud": 7,
+    #     "low_cloud": 8,
+    #     "sun_duration": 9,
+    #     "visibility": 10,
+    #     "weather_summary": 11,
+    # }
 
     # Process each row in the table
-    for row in table.find_all("tr")[1:]:  # Skip header row
+    for row in table.find_all("tr")[2:]:  # Skip header rows
         cells = row.find_all("td")
-        if len(cells) < 14:  # Ensure row has enough cells
+        if len(cells) < len(column_map):
             continue
 
+        # Get station info from first column
         station_cell = cells[0].find("a")
         if station_cell and station_cell.get("onmouseover"):
             mouseover = station_cell.get("onmouseover")
@@ -110,132 +156,263 @@ def parse_ogimet_data(
         else:
             station = null_if_empty(cells[0].text.strip())
 
-        if station == "Summary":
+        if station == "Summary" or not station:
             continue
 
-        station_id = station.split("-")[0].strip()
-        station_name = station.split("-")[1].strip()
-        temp_max = null_if_empty(cells[1].text.strip())
-        temp_min = null_if_empty(cells[2].text.strip())
-        temp_med = null_if_empty(cells[3].text.strip())
-        wind_dir = null_if_empty(cells[6].text.strip())
-        wind_speed = null_if_empty(cells[7].text.strip())
-        pressure = null_if_empty(cells[8].text.strip())
-        precipitation = null_if_empty(cells[9].text.strip())
-        total_cloud = null_if_empty(cells[10].text.strip())
-        low_cloud = null_if_empty(cells[11].text.strip())
-        sun_duration = null_if_empty(cells[12].text.strip())
-        visibility = null_if_empty(cells[13].text.strip())
-        snow_depth = null_if_empty(cells[14].text.strip())
+        try:
+            station_id = station.split("-")[0].strip()
+            station_name = station.split("-")[1].strip()
+        except IndexError:
+            print(f"Invalid station format: {station}")
+            continue
 
-        # Extract weather conditions from image alt text
-        weather_cells = row.find_all("td", bgcolor="#4040FF")
-        weather_conditions = []
-        for cell in weather_cells:
-            img = cell.find("img")
-            if img:
-                alt_text = img.get("alt", "")
-                mouseover = img.get("onmouseover", "")
-
-                # Extract condition and time from mouseover text
-                condition = ""
-                timestamp = ""
-                if "overlib('" in mouseover:
-                    mouseover_text = mouseover.split("overlib('")[1].split("');")[0]
-                    if "." in mouseover_text and "At" in mouseover_text:
-                        condition = mouseover_text.split(".")[0].strip()
-                        timestamp = (
-                            mouseover_text.split("At")[1].split("UTC")[0].strip()
-                        )
-
-                weather_conditions.append(
-                    {
-                        "image": null_if_empty(alt_text),
-                        "condition": null_if_empty(condition),
-                        "timestamp": null_if_empty(timestamp),
-                    }
-                )
-            else:
-                weather_conditions.append(
-                    {"image": None, "condition": None, "timestamp": None}
-                )
-
-        # print(f"station: {station}")
-        # print(f"temp_max: {temp_max}")
-        # print(f"temp_min: {temp_min}")
-        # print(f"temp_med: {temp_med}")
-        # print(f"wind_dir: {wind_dir}")
-        # print(f"wind_speed: {wind_speed}")
-        # print(f"pressure: {pressure}")
-        # print(f"precipitation: {precipitation}")
-        # print(f"total_cloud: {total_cloud}")
-        # print(f"low_cloud: {low_cloud}")
-        # print(f"sun_duration: {sun_duration}")
-        # print(f"visibility: {visibility}")
-        # print(f"snow_depth: {snow_depth}")
-        # print(f"weather_conditions: {weather_conditions}")
-
-        # print("-" * 100)
-
+        # Extract weather data using column positions
         row_data = {
             "date": query_date,
             "time": query_time,
             "station_id": station_id,
             "station_name": station_name,
-            "temp_max": temp_max,
-            "temp_min": temp_min,
-            "temp_med": temp_med,
-            "wind_dir": wind_dir,
-            "wind_speed": wind_speed,
-            "pressure": pressure,
-            "precipitation": precipitation,
-            "total_cloud": total_cloud,
-            "low_cloud": low_cloud,
-            "sun_duration": sun_duration,
-            "visibility": visibility,
-            "snow_depth": snow_depth,
-            # "weather_conditions": weather_conditions,
         }
 
-        try:
-            weather_data = WeatherData(**row_data)
-            weather_data_batch.append(weather_data)  # Add to batch instead of inserting
-        except Exception as e:
-            logging.warn(f"Error creating weather data object: {e}")
-
-    # Insert all records in batch at the end
-    if weather_data_batch:
-        try:
-            print(
-                f"Inserting {len(weather_data_batch)} weather records for {query_date} {query_time}"
+        # Get temperature values
+        if "temp_max" in column_map:
+            row_data["temp_max"] = parse_numeric(
+                cells[column_map["temp_max"]].text.strip()
             )
-            insert_weather_data(weather_data_batch)
+        if "temp_min" in column_map:
+            row_data["temp_min"] = parse_numeric(
+                cells[column_map["temp_min"]].text.strip()
+            )
+        if "temp_med" in column_map:
+            row_data["temp_med"] = parse_numeric(
+                cells[column_map["temp_med"]].text.strip()
+            )
+
+        # Get humidity and dew point
+        if "humidity" in column_map:
+            row_data["humidity"] = parse_numeric(
+                cells[column_map["humidity"]].text.strip()
+            )
+        if "dew_point" in column_map:
+            row_data["dew_point"] = parse_numeric(
+                cells[column_map["dew_point"]].text.strip()
+            )
+
+        # Get wind values
+        if "wind_dir" in column_map:
+            row_data["wind_dir"] = null_if_empty(
+                cells[column_map["wind_dir"]].text.strip()
+            )
+        if "wind_speed" in column_map:
+            row_data["wind_speed"] = parse_numeric(
+                cells[column_map["wind_speed"]].text.strip()
+            )
+        if "wind_gust" in column_map:
+            row_data["wind_gust"] = parse_numeric(
+                cells[column_map["wind_gust"]].text.strip()
+            )
+
+        # Get other measurements
+        if "pressure" in column_map:
+            row_data["pressure"] = parse_numeric(
+                cells[column_map["pressure"]].text.strip()
+            )
+        if "precipitation" in column_map:
+            row_data["precipitation"] = parse_numeric(
+                cells[column_map["precipitation"]].text.strip()
+            )
+        if "total_cloud" in column_map:
+            row_data["total_cloud"] = parse_numeric(
+                cells[column_map["total_cloud"]].text.strip()
+            )
+        if "low_cloud" in column_map:
+            row_data["low_cloud"] = parse_numeric(
+                cells[column_map["low_cloud"]].text.strip()
+            )
+        if "sun_duration" in column_map:
+            row_data["sun_duration"] = parse_numeric(
+                cells[column_map["sun_duration"]].text.strip()
+            )
+        if "visibility" in column_map:
+            row_data["visibility"] = parse_numeric(
+                cells[column_map["visibility"]].text.strip()
+            )
+
+        if "snow_depth" in column_map:
+            row_data["snow_depth"] = parse_numeric(
+                cells[column_map["snow_depth"]].text.strip()
+            )
+
+        len_row_data = len(row_data) - 2  # Remove date and time
+        len_column_map = len(column_map)
+
+        if len_row_data != len(column_map):
+            print(
+                f"Row data length ({len_row_data}) does not match column map length ({len_column_map}). "
+                f"Column names: {list(column_map.keys())}, Date: {row_data.get('date', 'unknown')}"
+            )
+            break
+
+        try:
+            # print(row_data)
+            # print("\n\n")
+            weather_data = WeatherData(**row_data)
+            weather_data_batch.append(weather_data)
         except Exception as e:
-            logging.error(f"Error inserting batch weather data: {e}")
+            print(f"Error creating weather data for station {station_id}: {e}")
+            continue
+
+    return weather_data_batch
 
 
-def fetch_and_parse_data(date: Optional[datetime.datetime] = None) -> pd.DataFrame:
+def parse_numeric(value: str) -> Optional[float]:
+    """Convert string to number, return None if invalid."""
+    value = null_if_empty(value)
+    if value is None:
+        return None
+    try:
+        return float(value)
+    except ValueError:
+        return None
+
+
+def get_column_mapping(header_rows):
     """
-    Fetch and parse weather data from OGIMET website.
+    Analyze header rows to determine the column structure and return a mapping of fields to indices.
+    """
+    headers = []
+    for row in header_rows:
+        headers.append([cell.get_text(strip=True) for cell in row.find_all(["th"])])
+
+    title_row = headers[0]
+    subtitle_row = headers[1]
+
+    expected = {
+        "Station": None,
+        "Temperature(C)": ["Max", "Min", "Med"],
+        "Td.Med(C)": None,
+        "Hr.Med(%)": None,
+        "Wind(km/h)": ["Dir.", "Int.", "Gust"],
+        "Pres.s.lev(Hp)": None,
+        "Prec.(mm)": None,
+        "TotClOct": None,
+        "LowClOct": None,
+        "SunD-1(h)": None,
+        "VisKm": None,
+        "SnowDep.(cm)": None,
+        "Dailyweather summary": None,
+    }
+
+    # Initialize column mapping
+    column_map = {}
+    current_index = 0
+
+    # Map fields based on the title and subtitle structure
+    for title in title_row:
+        if title not in expected:
+            print(f"Unknown column header found in first row: {title}")
+            current_index += 1
+            continue
+
+        # Get the expected subtitles for this title
+        subtitles = expected[title]
+
+        if subtitles is None:
+            # Handle columns without subtitles
+            if title == "Station":
+                column_map["station"] = current_index
+            elif title == "Td.Med(C)":
+                column_map["dew_point"] = current_index
+            elif title == "Hr.Med(%)":
+                column_map["humidity"] = current_index
+            elif title == "Pres.s.lev(Hp)":
+                column_map["pressure"] = current_index
+            elif title == "Prec.(mm)":
+                column_map["precipitation"] = current_index
+            elif title == "TotClOct":
+                column_map["total_cloud"] = current_index
+            elif title == "LowClOct":
+                column_map["low_cloud"] = current_index
+            elif title == "SunD-1(h)":
+                column_map["sun_duration"] = current_index
+            elif title == "VisKm":
+                column_map["visibility"] = current_index
+            elif title == "SnowDep.(cm)":
+                column_map["snow_depth"] = current_index
+            elif title == "Dailyweather summary":
+                column_map["weather_summary"] = current_index
+            current_index += 1
+        else:
+            # Handle columns with subtitles
+            for subtitle in subtitles:
+                if subtitle in subtitle_row:
+                    if title == "Temperature(C)":
+                        if subtitle == "Max":
+                            column_map["temp_max"] = current_index
+                        elif subtitle == "Min":
+                            column_map["temp_min"] = current_index
+                        elif subtitle == "Med":
+                            column_map["temp_med"] = current_index
+                    elif title == "Wind(km/h)":
+                        if subtitle == "Dir.":
+                            column_map["wind_dir"] = current_index
+                        elif subtitle == "Int.":
+                            column_map["wind_speed"] = current_index
+                        elif subtitle == "Gust":
+                            column_map["wind_gust"] = current_index
+                    current_index += 1
+
+    # No data found
+    # https://www.ogimet.com/cgi-bin/gsynres?lang=en&osum=no&state=Indon&fmt=html&ano=2000&mes=03&day=23&hora=12&ord=REV
+    if len(column_map) < 2:
+        typer.secho("No data found in column mapping", fg=typer.colors.YELLOW)
+        return {}
+
+    # Validate that column indices are sequential with no gaps
+    max_index = max(column_map.values())
+    expected_indices = set(range(max_index + 1))
+    actual_indices = set(column_map.values())
+
+    if expected_indices != actual_indices:
+        missing_indices = expected_indices - actual_indices
+        typer.secho(
+            f"Invalid column mapping - missing indices: {missing_indices}",
+            fg=typer.colors.RED,
+        )
+        raise
+
+    return column_map
+
+
+def fetch_and_parse_data(date: Optional[datetime.datetime] = None) -> None:
+    """
+    Fetch and parse weather data from OGIMET website, then store in database.
 
     Args:
         date: Optional datetime object. If not provided, current date will be used.
-
-    Returns:
-        pandas DataFrame containing the parsed weather data
     """
 
-    print(f"Fetching weather data for {date}")
+    # print(f"Fetching weather data for {date}")
 
     # Fetch the data
     query_date, query_time, html_content = fetch_ogimet_data(date)
 
-    print(f"Fetched weather data for {date}")
+    # print(f"Fetched data for {query_date} {query_time}")
 
     # Parse the data
-    parse_ogimet_data(query_date, query_time, html_content)
+    weather_data_batch = parse_ogimet_data(query_date, query_time, html_content)
 
-    print(f"Parsed weather data for {date}")
+    # Insert the data
+    if weather_data_batch:
+        try:
+            insert_weather_data(weather_data_batch)
+        except Exception as e:
+            typer.secho(f"Error inserting batch weather data: {e}", fg=typer.colors.RED)
+    else:
+        typer.secho(
+            f"No weather data found for {query_date} {query_time}",
+            fg=typer.colors.YELLOW,
+        )
 
 
 def null_if_empty(value: str) -> Optional[str]:

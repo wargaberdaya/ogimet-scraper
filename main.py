@@ -4,9 +4,12 @@ from src.utils import (
     save_output,
     get_missing_dates,
 )
-from src.db.postgres import get_weather_data, init_database
+from src.db.sqlite import get_weather_data, init_database, get_all_weather_data
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime
+import os
+
 
 app = typer.Typer()
 
@@ -22,10 +25,13 @@ def summary(
     to_date: str = typer.Option(
         None, "--to", help="Optional end date in YYYY-MM-DD format"
     ),
+    save: bool = typer.Option(False, "--save", help="Save output to file"),
 ):
     init_database()
 
     missing_dates = get_missing_dates(from_date=from_date, to_date=to_date)
+
+    print(f"Found {len(missing_dates)} missing dates")
 
     with ThreadPoolExecutor(max_workers=10) as executor:
         futures = [
@@ -38,31 +44,20 @@ def summary(
             for future in progress:
                 future.result()
 
-    weather_data = get_weather_data(from_date=from_date, to_date=to_date)
 
-    df = pd.DataFrame(
-        weather_data,
-        columns=[
-            "date",
-            "time",
-            "station_id",
-            "station_name",
-            "temp_max",
-            "temp_min",
-            "temp_med",
-            "wind_dir",
-            "wind_speed",
-            "pressure",
-            "precipitation",
-            "total_cloud",
-            "low_cloud",
-            "sun_duration",
-            "visibility",
-            "snow_depth",
-        ],
-    )
+@app.command()
+def dump():
+    print("Dumping data to parquet")
+    df = pd.DataFrame(get_all_weather_data())
+    print(f"Found {len(df)} rows")
 
-    save_output(df=df)
+    today = datetime.now().strftime("%Y-%m-%d")
+
+    os.makedirs("output/dump", exist_ok=True)
+
+    df.to_parquet(f"output/dump/{today}.parquet")
+
+    print(f"Data dumped to output/dump/{today}.parquet")
 
 
 if __name__ == "__main__":
