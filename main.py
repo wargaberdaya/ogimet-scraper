@@ -48,15 +48,38 @@ def summary(
 @app.command()
 def dump():
     print("Dumping data to parquet")
-    df = pd.DataFrame(get_all_weather_data())
+    # Define column names based on the SQLite schema
+    columns = [
+        "date",
+        "time",
+        "station_id",
+        "station_name",
+        "temp_max",
+        "temp_min",
+        "temp_med",
+        "wind_dir",
+        "wind_speed",
+        "wind_gust",
+        "pressure",
+        "precipitation",
+        "total_cloud",
+        "low_cloud",
+        "sun_duration",
+        "visibility",
+        "humidity",
+        "dew_point",
+        "weather_summary",
+        "snow_depth",
+        "_updated_at",
+    ]
+
+    # Create DataFrame with column names
+    df = pd.DataFrame(get_all_weather_data(), columns=columns)
     print(f"Found {len(df)} rows")
 
     today = datetime.now().strftime("%Y-%m-%d")
-
     os.makedirs("output/dump", exist_ok=True)
-
     df.to_parquet(f"output/dump/{today}.parquet")
-
     print(f"Data dumped to output/dump/{today}.parquet")
 
 
