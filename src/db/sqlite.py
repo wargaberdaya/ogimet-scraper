@@ -9,6 +9,10 @@ from pydantic import BaseModel
 def get_db_connection():
     """Create a database connection context manager."""
     db_path = os.getenv("DATABASE_PATH", "weather_data.db")
+    # Create the directory if it doesn't exist
+    os.makedirs(
+        os.path.dirname(db_path) if os.path.dirname(db_path) else ".", exist_ok=True
+    )
     conn = sqlite3.connect(db_path)
     try:
         yield conn
