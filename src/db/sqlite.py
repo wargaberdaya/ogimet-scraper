@@ -54,6 +54,24 @@ def create_weather_table():
         print("Weather data table created successfully.")
 
 
+def create_station_table():
+    """Create the station details table if it doesn't exist."""
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS station_details (
+                station_id TEXT PRIMARY KEY,
+                name TEXT,
+                latitude REAL,
+                longitude REAL,
+                altitude REAL,
+                _updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.commit()
+        print("Station details table created successfully.")
+
+
 def insert_weather_data(weather_data: Union[BaseModel, list[BaseModel]]):
     """Insert weather data into SQLite database."""
     with get_db_connection() as conn:
@@ -85,6 +103,23 @@ def insert_weather_data(weather_data: Union[BaseModel, list[BaseModel]]):
 
         # Execute many inserts at once
         cur.executemany(sql, values)
+        conn.commit()
+
+
+def insert_station_details(
+    station_id: str, name: str, coords: tuple[float, float], altitude: float
+):
+    """Insert or update station details in the database."""
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute(
+            """
+            INSERT OR REPLACE INTO station_details 
+            (station_id, name, latitude, longitude, altitude)
+            VALUES (?, ?, ?, ?, ?)
+        """,
+            (station_id, name, coords[0], coords[1], altitude),
+        )
         conn.commit()
 
 
@@ -145,6 +180,45 @@ def get_existing_dates() -> list[str]:
         return [date[0] for date in cur.fetchall()]
 
 
+def get_station_list() -> list[tuple[str, str]]:
+    """Get list of distinct stations in the database.
+
+    Returns:
+        List of tuples containing (station_id, station_name)
+    """
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT DISTINCT station_id, station_name FROM weather_data")
+        return cur.fetchall()
+
+
+def get_missing_stations() -> list[tuple[str, str]]:
+    """Get list of stations that exist in weather_data but not in stations table.
+
+    Returns:
+        List of tuples containing (station_id, station_name) that need to be added
+    """
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        # Get stations that are in weather_data but not in station_details table
+        cur.execute("""
+            SELECT DISTINCT w.station_id, w.station_name 
+            FROM weather_data w
+            LEFT JOIN station_details s ON w.station_id = s.station_id
+            WHERE s.station_id IS NULL
+        """)
+        return cur.fetchall()
+
+
 def init_database():
     """Initialize the database and create tables if they don't exist."""
     create_weather_table()
+    create_station_table()
+
+
+def get_all_station_details() -> list[tuple]:
+    """Get all station details from the database."""
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM station_details")
+        return cur.fetchall()

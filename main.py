@@ -3,8 +3,18 @@ from src.utils import (
     fetch_and_parse_data,
     save_output,
     get_missing_dates,
+    fetch_station_data,
+    parse_station_data,
 )
-from src.db.sqlite import get_weather_data, init_database, get_all_weather_data
+from src.db.sqlite import (
+    get_weather_data,
+    init_database,
+    get_all_weather_data,
+    get_station_list,
+    insert_station_details,
+    get_missing_stations,
+    get_all_station_details,
+)
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -81,6 +91,56 @@ def dump():
     os.makedirs("output/dump", exist_ok=True)
     df.to_parquet(f"output/dump/{today}.parquet")
     print(f"Data dumped to output/dump/{today}.parquet")
+
+
+@app.command()
+def station():
+    init_database()
+
+    station_list = get_missing_stations()
+    print(f"Found {len(station_list)} stations")
+    print("Fetching station data...")
+
+    def fetch_station_details(station_tuple):
+        station_id, _ = station_tuple
+        try:
+            data = fetch_station_data(station_id)
+            details = parse_station_data(data)
+            # Store the station details in the database
+            insert_station_details(
+                station_id=details.station_id,
+                name=details.name,
+                coords=(details.latitude, details.longitude),
+                altitude=details.altitude,
+            )
+            print(f"Fetched and stored data for station {station_id}")
+            return details
+        except Exception as e:
+            print(f"Error fetching data for station {station_id}: {e}")
+            return None
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        station_details = list(
+            filter(None, executor.map(fetch_station_details, station_list))
+        )
+
+
+@app.command()
+def station_dump():
+    """Dump station details to parquet file."""
+    print("Dumping station data to parquet")
+
+    # Define column names based on the SQLite schema
+    columns = ["station_id", "name", "latitude", "longitude", "altitude", "_updated_at"]
+
+    # Create DataFrame with column names
+    df = pd.DataFrame(get_all_station_details(), columns=columns)
+    print(f"Found {len(df)} stations")
+
+    today = datetime.now().strftime("%Y-%m-%d")
+    os.makedirs("output/station_dump", exist_ok=True)
+    df.to_parquet(f"output/station_dump/{today}.parquet")
+    print(f"Station data dumped to output/station_dump/{today}.parquet")
 
 
 if __name__ == "__main__":

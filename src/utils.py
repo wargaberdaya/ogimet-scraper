@@ -11,6 +11,7 @@ from bs4 import BeautifulSoup
 from pydantic import BaseModel, Field
 import requests
 import typer
+import re
 
 from src.db.sqlite import insert_weather_data, get_weather_data, get_existing_dates
 
@@ -61,6 +62,140 @@ def fetch_ogimet_data(
         print(f"Error fetching data: {e}")
         raise
     return query_date, query_time, response.text
+
+
+def fetch_station_data(station_id: str) -> str:
+    """Fetch station data from OGIMET website.
+
+    Args:
+        station_id: The station ID to fetch data for
+
+    Returns:
+        The HTML content from the station data page
+    """
+    url = f"https://www.ogimet.com/cgi-bin/gsynres?lang=en&ind={station_id}"
+
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Connection": "keep-alive",
+        "Cookie": "ogimet_serverid=huracan|Z4N5U|Z4N3p",
+        "Cache-Control": "no-cache",
+    }
+
+    try:
+        response = requests.get(url, headers=headers, timeout=10)
+        response.raise_for_status()
+    except requests.exceptions.Timeout:
+        print("Request timed out - retrying once...")
+        time.sleep(2)
+        response = requests.get(url, headers=headers, timeout=10)
+    except requests.exceptions.RequestException as e:
+        print(f"Error fetching station data: {e}")
+        raise
+
+    return response.text
+
+
+class StationData(BaseModel):
+    """Model for weather station details."""
+
+    station_id: str = Field(description="Weather station identifier")
+    name: str = Field(description="Weather station name")
+    latitude: float = Field(description="Station latitude in decimal degrees")
+    longitude: float = Field(description="Station longitude in decimal degrees")
+    altitude: float = Field(description="Station altitude in meters")
+
+
+def parse_station_data(html_content: str) -> StationData:
+    """Parse the HTML content from the OGIMET website and extract station details.
+
+    Args:
+        html_content: Raw HTML content from station data page
+
+    Returns:
+        StationData object containing station details
+    """
+    soup = BeautifulSoup(html_content, "html.parser")
+
+    # Find the station info table
+    table = soup.find("table", attrs={"border": "2", "align": "center"})
+    if not table:
+        raise ValueError("Could not find station info table")
+
+    # Extract station details from table text
+    station_text = table.get_text()
+
+    # Parse station ID and name
+    id_name = re.search(r"(\d+):.*?([^()]+)", station_text)
+    if not id_name:
+        raise ValueError("Could not parse station ID and name")
+    station_id = id_name.group(1)
+    station_name = id_name.group(2).strip()
+
+    # Parse coordinates
+    coords = re.search(r"Latitude: (.*?) .*?Longitude: (.*?) ", station_text)
+    if not coords:
+        raise ValueError("Could not parse coordinates")
+
+    def convert_to_decimal(coord_str: str) -> float:
+        # Store original string to check direction later
+        orig_coord = coord_str
+
+        # Remove cardinal directions and clean up string
+        coord_str = (
+            coord_str.replace("N", "")
+            .replace("S", "")
+            .replace("E", "")
+            .replace("W", "")
+            .strip()
+        )
+
+        # Split into components, handling both space and hyphen separators
+        parts = coord_str.replace("-", " ").split()
+
+        # Handle cases with only degrees and minutes
+        if len(parts) == 2:
+            degrees, minutes = map(float, parts)
+            seconds = 0
+        else:
+            degrees, minutes, seconds = map(float, parts)
+
+        # Calculate decimal degrees
+        decimal = degrees + minutes / 60 + seconds / 3600
+
+        # Make negative if South or West
+        if "S" in orig_coord or "W" in orig_coord:
+            decimal = -decimal
+
+        return decimal
+
+    latitude = convert_to_decimal(coords.group(1))
+    longitude = convert_to_decimal(coords.group(2))
+
+    # Parse altitude
+    alt = re.search(r"Altitude: (\d+)", station_text)
+    if not alt:
+        raise ValueError("Could not parse altitude")
+    altitude = float(alt.group(1))
+
+    # print(
+    #     {
+    #         "station_id": station_id,
+    #         "name": station_name,
+    #         "latitude": latitude,
+    #         "longitude": longitude,
+    #         "altitude": altitude,
+    #     }
+    # )
+
+    return StationData(
+        station_id=station_id,
+        name=station_name,
+        latitude=latitude,
+        longitude=longitude,
+        altitude=altitude,
+    )
 
 
 class WeatherData(BaseModel):
