@@ -127,8 +127,8 @@ def station():
 
 @app.command()
 def station_dump():
-    """Dump station details to parquet file."""
-    print("Dumping station data to parquet")
+    """Dump station details to parquet, json and csv files."""
+    print("Dumping station data to multiple formats")
 
     # Define column names based on the SQLite schema
     columns = ["station_id", "name", "latitude", "longitude", "altitude", "_updated_at"]
@@ -139,8 +139,18 @@ def station_dump():
 
     today = datetime.now().strftime("%Y-%m-%d")
     os.makedirs("output/station_dump", exist_ok=True)
+
+    # Save to parquet
     df.to_parquet(f"output/station_dump/{today}.parquet")
     print(f"Station data dumped to output/station_dump/{today}.parquet")
+
+    # Save to JSON
+    df.to_json(f"output/station_dump/{today}.json", orient="records", indent=2)
+    print(f"Station data dumped to output/station_dump/{today}.json")
+
+    # Save to CSV
+    df.to_csv(f"output/station_dump/{today}.csv", index=False)
+    print(f"Station data dumped to output/station_dump/{today}.csv")
 
 
 if __name__ == "__main__":
